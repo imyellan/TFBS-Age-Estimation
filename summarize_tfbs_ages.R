@@ -7,6 +7,7 @@ library(dtplyr)
 library(stringr)
 # library(Biostrings)
 # library(universalmotif)
+source("~/tfbs_age_estimation/summarize_tfbs_ages_fns.R")
 
 # import arguments
 psl_dir <- commandArgs(trailingOnly = TRUE)[1]
@@ -29,75 +30,9 @@ type_species <- c(
   Homo = "Homo_sapiens"
 )
 
-get_adjusted_age <- function(in_string, max_age) {
-  # browser()
-  if (is.infinite(max_age)) {
-    return(-Inf)
-  }
-  for (taxa in names(type_species)[mammal_dates <= max_age]) {
-    small_clade_flag <- T
-    tax_spec <- extract.clade(
-      tree, getMRCA(tree, c("Homo_sapiens", type_species[taxa]))
-    )$tip.label
-    if (taxa != "Homo") {
-      tax_spec <- tax_spec[tax_spec != "Homo_sapiens"]
-      num_spec <- length(tax_spec)
-      matching_spec <- names(unlist(sapply(tax_spec, function(x) grep(x, in_string))))
-      n_matching_spec <- length(matching_spec)
-      # to account for clades with a small number of species sharing the MRCA with humans
-      clade_spec <- ages_df %>%
-        filter(species_age == mammal_dates[taxa]) %>%
-        pull(species) %>%
-        gsub(" ", "_", .)
-      small_clade_flag <- any(matching_spec %in% clade_spec)
-      # small_clade_flag <- case_when(
-      #   taxa == "Eutheria" ~any(matching_spec %in% euth),
-      #   taxa == "Euarchonta" ~ any(grepl("Tupaia", matching_spec)),
-      #   taxa == "Primatomorpha" ~ any(grepl("Galeopterus", matching_spec)),
-      #   taxa == "Hominoidea" ~ any(grepl("Nomascus", matching_spec)),
-      #   taxa == "Hominidae" ~ any(grepl("Pongo", matching_spec)),
-      #   taxa == "Homininae" ~ any(grepl("Gorilla", matching_spec)),
-      #   taxa == "Hominini" ~ any(grepl("Pan", matching_spec)),
-      #   TRUE ~ TRUE)
-      # since there are only two chimp species, treating presence in one as sufficient
-      if (taxa == "Hominini") {
-        n_matching_spec <- 2
-      }
-    } else {
-      tax_spec <- "Homo_sapiens"
-      n_matching_spec <- 1
-      num_spec <- 1
-    }
-    # browser()
-    if (n_matching_spec / num_spec >= 0.6 & small_clade_flag) {
-      return(mammal_dates[taxa])
-      break
-    }
-  }
-}
-
-import_animal_fas <- function(fa_path) {
-  if (file.info(fa_path)$size > 0) {
-    species <- gsub(".*_([A-Za-z]+_[A-Za-z]+).fa", "\\1", basename(fa_path))
-    dna_str <- Biostrings::readDNAStringSet(fa_path)
-    data.frame(
-      species = species,
-      tfbs_nm = names(dna_str),
-      lftover_seq = as.data.frame(dna_str)$x
-    ) %>% unique()
-  }
-}
-
-compare_strings <- function(str1, str2) {
-  if (!is.na(str1) & !is.na(str2) & nchar(str1) == nchar(str2)) {
-    Biostrings::compareStrings(str1, str2)
-  } else {
-    return("")
-  }
-}
-
 # import other data
 psl_df_max_ages_tmp <- read_csv(file.path(psl_dir, paste0(TF, "_tfbs_liftover_ages_tmp.csv.gz"))) %>% lazy_dt()
+
 ages_df <- read_csv("~/scratch/tfbs_ages/human_cactus_genome_ages_timetree.csv")
 ages_df <- ages_df %>%
   transmute(
@@ -118,9 +53,19 @@ PWM_scores <- read_tsv(
   ),
   col_names = c("chr", "start", "end", "tfbs_nm", "PWM_score", "strand")
 )
-PWM <- universalmotif::read_cisbp(list.files("~/scratch/tfbs_ages/motifs",
-  pattern = paste0(TF, "_"), full.names = T
-))
+# PWM <- universalmotif::read_cisbp(
+#   list.files("~/scratch/tfbs_ages/motifs/pfms_ali", 
+#              pattern = paste0(TF, "_"), full.names = T
+# ))
+PWM <- universalmotif::read_matrix(
+  list.files("~/scratch/tfbs_ages/motifs/pfms_ali", 
+             pattern = paste0(TF, "_"), full.names = T), 
+  type = "PCM", sep = "\t", headers = F)
+pwm_mat <- PWM@motif
+in_mat_colsums <- colSums(pwm_mat + 0.01*0.25)
+in_mat_freq <- (pwm_mat + 0.01*0.25)/in_mat_colsums
+moods_pwm <- log(in_mat_freq/0.25)
+
 human_motif_hits <-
   Biostrings::readDNAStringSet(list.files("~/scratch/tfbs_ages/tmp_fas",
     pattern = paste0(TF, "_"), full.names = T
@@ -143,24 +88,54 @@ motif_hit_df <- full_join(human_motif_hits, animal_motif_hits) %>%
     tfbs_nm.species =
       paste0(tfbs_nm, ".", species, ".", lftover_seq)
   )
-liftover_pwm_scores <-
-  as.data.frame(universalmotif::scan_sequences(
-    universalmotif::convert_type(PWM, "PWM", pseudocount = 1e-3),
-    Biostrings::DNAStringSet(
-      motif_hit_df %>% filter(nchar(lftover_seq) == nchar(hum_seq)) %>%
-        select(tfbs_nm.species, lftover_seq) %>% unique() %>% tibble::deframe()
-    ),
-    threshold = 1
-  )@listData)
+# start.time <- Sys.time()
+# liftover_pwm_scores <-
+#   as.data.frame(universalmotif::scan_sequences(
+#     universalmotif::convert_type(PWM, "PWM", pseudocount = 1e-3),
+#     Biostrings::DNAStringSet(
+#       motif_hit_df %>% filter(nchar(lftover_seq) == nchar(hum_seq)) %>%
+#         # slice_head(n = 1000) %>%
+#         select(tfbs_nm.species, lftover_seq) %>% unique() %>% tibble::deframe()
+#     ),
+#     threshold = 1
+#   )@listData)
+# end.time <- Sys.time()
+# end.time - start.time
+
+# start.time <- Sys.time()
+# liftover_pwm_scores <- motif_hit_df %>% 
+#   filter(nchar(lftover_seq) == nchar(hum_seq)) %>%
+#   # slice_head(n = 1000) %>%
+#   select(tfbs_nm.species, lftover_seq) %>% unique() %>% 
+#   tibble::deframe() %>% 
+#   map(~moods_replica(moods_pwm, .x))
+# end.time <- Sys.time()
+# end.time - start.time
+
+hum_length <- nchar(head(motif_hit_df$hum_seq, n = 1))
+start.time <- Sys.time()
+motif_hit_df <- motif_hit_df %>% 
+  # filter(nchar(lftover_seq) == nchar(hum_seq)) %>%
+  # slice_head(n = 100000) %>%
+  # select(tfbs_nm.species, lftover_seq) %>% unique() %>% 
+  rowwise() %>%
+  mutate(lftover_pwm_score = 
+           moods_replica(moods_pwm, lftover_seq, hum_length)) %>%
+  # tidyr::unnest(lftover_pwm_score) %>%
+  ungroup()
+end.time <- Sys.time()
+end.time - start.time
+
+
 motif_hit_df <- motif_hit_df %>%
   mutate(
     seq_compare = mapply(compare_strings, hum_seq, lftover_seq),
     frac_matches_new = 1 - (str_count(seq_compare, "\\?") / nchar(seq_compare))
   ) %>%
-  left_join(tibble(
-    tfbs_nm.species = liftover_pwm_scores$sequence,
-    lftover_pwm_score = liftover_pwm_scores$score
-  )) %>%
+  # left_join(tibble(
+  #   tfbs_nm.species = liftover_pwm_scores$sequence,
+  #   lftover_pwm_score = liftover_pwm_scores$score
+  # )) %>%
   mutate(lftover_score_over_thresh = lftover_pwm_score >= trip_opt_thresh)
 
 psl_df_max_ages_tmp <- psl_df_max_ages_tmp %>%
@@ -181,19 +156,6 @@ psl_df_max_ages_tmp <- psl_df_max_ages_tmp %>%
                       frac_matches_new == 1 & target_length_near_tfbs, frac_100)
   ) %>%
   as_tibble()
-
-# detach("package:GenomeInfoDb", unload=TRUE)
-# unloadNamespace("GenomeInfoDb")
-# detach("package:IRanges", unload=TRUE)
-# unloadNamespace("IRanges")
-# detach("package:BiocGenerics", unload=TRUE)
-# unloadNamespace("BiocGenerics")
-# detach("package:Biostrings", unload=TRUE)
-# unloadNamespace("Biostrings")
-
-# join with PWM scores
-# psl_df_max_ages_tmp_pwm_scores <- psl_df_max_ages_tmp %>%
-#   left_join(lazy_dt(PWM_scores) %>% select(tfbs_nm, PWM_score)) %>% as_tibble()
 
 ## Summarize ages
 cluster <- new_cluster(parallel::detectCores() - 1)

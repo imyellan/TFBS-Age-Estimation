@@ -7,17 +7,29 @@ library(furrr)
 # import arguments
 psl_dir <- commandArgs(trailingOnly = TRUE)[1]
 TF <- commandArgs(trailingOnly = TRUE)[2]
+ancestral <- commandArgs(trailingOnly = TRUE)[3]
+
+if(ancestral == "ancestral") {
+  ancestral <- "_ancestral"
+} else {
+  ancestral <- NULL
+}
 
 # import other data
 print(paste0("Rscript /home/iyellan/scripts/tfbs_liftover_parse.R /home/iyellan/scratch/tfbs_ages/liftover_results ", TF))
 psl_files <- list.files(psl_dir, full.names = T, pattern = paste0(TF, "\\..*.txt"))
-ages_df <- read_csv("~/scratch/tfbs_ages/human_cactus_genome_ages_timetree.csv")
-ages_df <- ages_df %>%
-  transmute(
-    species = gsub(" ", "_", scientific_name_b),
-    species_age = precomputed_age
-  ) #%>%
-  #lazy_dt()
+if (ancestral == "_ancestral") {
+  ages_df <- read_tsv("~/scratch/tfbs_ages/hum_ancestral_genomes.txt",
+                      col_names = c("species", "clade", "precomputed_age")) %>%
+    select(-clade)
+} else {
+  ages_df <- read_csv("~/scratch/tfbs_ages/human_cactus_genome_ages_timetree.csv") %>%
+    transmute(
+      species = gsub(" ", "_", scientific_name_b),
+      species_age = precomputed_age
+    )
+}
+
 TF_ages_df <- read_csv("~/scratch/tfbs_ages/all_codebook_TFs_ages_DBDs_darks.csv") %>%
   transmute(TF = `Gene name`, TF_age = max_age)
 
@@ -53,17 +65,19 @@ import_psl <- function(psl_fil) {
   plan(multicore, workers = (parallel::detectCores() - 1))
   psl_df <- psl_files %>% future_map_dfr(import_psl)
   plan(sequential)
-  write_csv(psl_df, file.path(psl_dir, paste0(TF, "_tfbs_liftover.csv.gz")))
+  write_csv(psl_df, file.path(psl_dir, paste0(TF, ancestral, "_tfbs_liftover.csv.gz")))
   
   # write targets to bed file for later
-  lft_bed_dir <- "~/scratch/tfbs_ages/liftover_beds"
+  lft_bed_dir <- paste0("~/scratch/tfbs_ages/liftover_beds", ancestral)
   dir.create(lft_bed_dir, showWarnings = F)
   psl_df %>% 
     transmute(species, tName, tStart, tEnd, tfbs_nm, score = 0, 
               strand = sapply(strand, function(x) strsplit(x, "")[[1]][2])) %>%
     group_by(species) %>%
     group_walk(~write_tsv(x = .x %>% unique(), 
-                          file = file.path(lft_bed_dir, paste0(TF, "_", .y, ".bed")),
+                          file = file.path(lft_bed_dir, 
+                                           paste0(TF, "_", .y, ancestral,
+                                                  ".bed")),
                           col_names = F)) 
   
   psl_df <- lazy_dt(psl_df) %>%
@@ -101,7 +115,7 @@ import_psl <- function(psl_fil) {
     relocate(TF, species, .before = tfbs_nm)# %>%
     #as_tibble()
   write_csv(psl_df_ages %>% as_tibble(), 
-            file.path(psl_dir, paste0(TF, "_tfbs_liftover_ages.csv.gz")))
+            file.path(psl_dir, paste0(TF, ancestral, "_tfbs_liftover_ages.csv.gz")))
 # } else {
   # psl_df_ages <- read_csv(file.path(psl_dir, paste0(TF, "_tfbs_liftover_ages.csv.gz"))) #%>%
   # if(!"species_age" %in% colnames(psl_df_ages)){
@@ -134,7 +148,9 @@ import_psl <- function(psl_fil) {
     slice_max(target_length_near_tfbs_num, with_ties = T) %>% # first prioritize nearness to TFBS length
     slice_max(frac_matches, n = 1, with_ties = F) %>% # then prioritize match %
     as_tibble()
-  write_csv(psl_df_max_ages_tmp, file.path(psl_dir, paste0(TF, "_tfbs_liftover_ages_tmp.csv.gz")))
+  write_csv(psl_df_max_ages_tmp, 
+            file.path(psl_dir, paste0(TF, ancestral, 
+                                      "_tfbs_liftover_ages_tmp.csv.gz")))
 # } else{
   # psl_df_max_ages_tmp <- read_csv(file.path(psl_dir, paste0(TF, "_tfbs_liftover_ages_tmp.csv.gz")))
 # }
