@@ -47,7 +47,7 @@ PWM_scores <- read_tsv(
 PWM <- universalmotif::read_matrix(
   list.files("~/scratch/tfbs_ages/motifs/pfms_ali", 
              pattern = paste0(TF, "_"), full.names = T), 
-  type = "PCM", sep = "\t", headers = F)
+  type = "PCM", sep = "\t", headers = F, positions = 'columns')
 pwm_mat <- PWM@motif
 in_mat_colsums <- colSums(pwm_mat + 0.01*0.25)
 in_mat_freq <- (pwm_mat + 0.01*0.25)/in_mat_colsums
@@ -58,7 +58,7 @@ human_motif_hits <-
                                           pattern = paste0(TF, "_"), full.names = T
   ))
 human_motif_hits <- data.frame(
-  tfbs_nm = names(human_motif_hits),
+  tfbs_nm = gsub(":|-", "_", names(human_motif_hits)),
   hum_seq = as.data.frame(human_motif_hits)$x
 ) %>%
   unique()

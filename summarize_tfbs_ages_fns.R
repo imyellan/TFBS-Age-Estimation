@@ -87,7 +87,7 @@ traverse_ancestral <- function(df_filt, tfbs_nm, frac_thresh){
       # }
       # check if last species in df_filt has been reached
       # check if tfbs was aligned to species - if not pass will be NULL and length 0,
-      if (length(pass) == 0 | is.na(pass)) {
+      if (length(pass) == 0 || is.na(pass)) {
         # if i == 1, then no alignment with any ancestral genome, so age is 0
         passing_clade <- ifelse(i > 1, ages_df$clade[(i - 1)], "Homo")
         passing_age <- ifelse(i > 1, ages_df$precomputed_age[(i - 1)], 0)
